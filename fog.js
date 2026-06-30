@@ -45,32 +45,26 @@
     //    Nonlinear params (highlights/shadows, gamma) would swap these for
     //    type="table"/"gamma" later. feColorMatrix is the slot for saturation
     //    (it mixes channels, so it can't live in the per-channel transfer).
+    const NS = 'http://www.w3.org/2000/svg';
     const holder = document.createElement('div');
     holder.id = SVG_ID;
     holder.setAttribute('aria-hidden', 'true');
     holder.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none';
-    holder.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg">
-        <filter id="${GRADE_ID}" x="0" y="0" width="100%" height="100%">
-          <feColorMatrix id="rea-fog-sat" type="saturate" values="1"/>
-          <feComponentTransfer>
-            <feFunc id="rea-fog-R" type="linear" slope="1" intercept="0"/>
-            <feFunc id="rea-fog-G" type="linear" slope="1" intercept="0"/>
-            <feFunc id="rea-fog-B" type="linear" slope="1" intercept="0"/>
-          </feComponentTransfer>
-        </filter>
-      </svg>`;
-    // feFunc elements need their real SVG tag names (feFuncR/G/B); innerHTML
-    // can't set those via a shared template, so rename after parse.
-    const ns = 'http://www.w3.org/2000/svg';
-    const renamed = {};
-    [['rea-fog-R', 'feFuncR'], ['rea-fog-G', 'feFuncG'], ['rea-fog-B', 'feFuncB']].forEach(([id, tag]) => {
-      const old = holder.querySelector('#' + id);
-      const el = document.createElementNS(ns, tag);
-      el.setAttribute('type', 'linear'); el.setAttribute('slope', '1'); el.setAttribute('intercept', '0');
-      old.replaceWith(el); renamed[tag] = el;
-    });
-    const fnR = renamed.feFuncR, fnG = renamed.feFuncG, fnB = renamed.feFuncB;
+    const svg = document.createElementNS(NS, 'svg');
+    const filter = document.createElementNS(NS, 'filter');
+    filter.setAttribute('id', GRADE_ID);
+    filter.setAttribute('x', '0'); filter.setAttribute('y', '0');
+    filter.setAttribute('width', '100%'); filter.setAttribute('height', '100%');
+    const sat = document.createElementNS(NS, 'feColorMatrix');     // saturation slot (identity for now)
+    sat.setAttribute('type', 'saturate'); sat.setAttribute('values', '1');
+    const xfer = document.createElementNS(NS, 'feComponentTransfer');
+    const fnR = (function (t) { const f = document.createElementNS(NS, t); f.setAttribute('type', 'linear'); f.setAttribute('slope', '1'); f.setAttribute('intercept', '0'); return f; })('feFuncR');
+    const fnG = (function (t) { const f = document.createElementNS(NS, t); f.setAttribute('type', 'linear'); f.setAttribute('slope', '1'); f.setAttribute('intercept', '0'); return f; })('feFuncG');
+    const fnB = (function (t) { const f = document.createElementNS(NS, t); f.setAttribute('type', 'linear'); f.setAttribute('slope', '1'); f.setAttribute('intercept', '0'); return f; })('feFuncB');
+    xfer.append(fnR, fnG, fnB);
+    filter.append(sat, xfer);
+    svg.appendChild(filter);
+    holder.appendChild(svg);
 
     // 2) The cover: a transparent, click-through layer that carries the recipe
     //    via backdrop-filter, so the grade lands on everything painted behind
