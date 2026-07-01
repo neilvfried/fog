@@ -1,6 +1,7 @@
 (function () {
-  if (window.__reaFogInit) return;
+  if (window.__reaFogInit) { console.log('[fog] already initialized on', location.href); return; }
   window.__reaFogInit = true;
+  console.log('[fog] content script loaded on', location.href);
 
   const SVG_ID = 'rea-fog-svg', GRADE_ID = 'rea-fog-grade', CHIP_ID = 'rea-fog-chip';
   const NS = 'http://www.w3.org/2000/svg';
@@ -23,9 +24,12 @@
     if (window.__reaFogCleanup) { window.__reaFogCleanup(); window.__reaFogCleanup = null; }
   }
 
-  function buildChip() {
-    if (document.getElementById(CHIP_ID)) return;
-    if (!document.body) { document.addEventListener('DOMContentLoaded', buildChip, { once: true }); return; }
+  function buildChip() { try { _buildChip(); } catch (e) { console.error('[fog] buildChip failed:', e); } }
+
+  function _buildChip() {
+    console.log('[fog] buildChip: start');
+    if (document.getElementById(CHIP_ID)) { console.log('[fog] buildChip: panel already present'); return; }
+    if (!document.body) { console.log('[fog] buildChip: no body yet, waiting for DOMContentLoaded'); document.addEventListener('DOMContentLoaded', buildChip, { once: true }); return; }
 
     // --- the grade "recipe": an invisible SVG <filter> -----------------------
     // Each channel is one feFunc type="linear" (an affine map): exposure,
@@ -112,6 +116,7 @@
     const root = document.documentElement;
     root.appendChild(holder);
     root.appendChild(chip);
+    console.log('[fog] buildChip: panel appended', chip.getBoundingClientRect());
 
     const dimSlider = chip.querySelector('.ff-dim');
     const expSlider = chip.querySelector('.ff-exp');
@@ -212,11 +217,15 @@
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (!msg) return;
+    console.log('[fog] message:', msg.type);
     if (msg.type === 'fog-on') buildChip();
     else if (msg.type === 'fog-off') removeChip();
   });
 
   try {
-    chrome.storage.local.get('enabled', (o) => { if (o && o.enabled) buildChip(); });
-  } catch (e) {}
+    chrome.storage.local.get('enabled', (o) => {
+      console.log('[fog] storage enabled =', o && o.enabled);
+      if (o && o.enabled) buildChip();
+    });
+  } catch (e) { console.error('[fog] storage read failed:', e); }
 })();
