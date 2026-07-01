@@ -5,9 +5,10 @@
 
   const SVG_ID = 'rea-fog-svg', GRADE_ID = 'rea-fog-grade', CHIP_ID = 'rea-fog-chip';
   const NS = 'http://www.w3.org/2000/svg';
-  const KNOB = 14, HALO = 8, HIT = KNOB / 2 + HALO;
+  const PAD = 168, DISC = 30, DR = DISC / 2;          // pad size, disc size, disc radius (px)
   const FACETS_LIGHT = 'rgba(255,255,255,.12)', FACETS_DARK = 'rgba(0,0,0,.10)';
-  const OCTAGON = 'polygon(30% 0,70% 0,100% 30%,100% 70%,70% 100%,30% 100%,0 70%,0 30%)';
+
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
   function buildFacets() {
     const n = Math.floor(Math.random() * 11) + 5, offset = Math.floor(Math.random() * 360), seg = 360 / n, stops = [];
@@ -16,6 +17,23 @@
       stops.push(`${col} ${(i * seg).toFixed(2)}deg ${((i + 1) * seg).toFixed(2)}deg`);
     }
     return `conic-gradient(from ${offset}deg, ${stops.join(',')})`;
+  }
+
+  // Polar grid backdrop (concentric rings + spokes + emphasized axes), as a
+  // crisp data-URI SVG so it scales with the pad.
+  function gridBackground() {
+    const c = 50, rings = [16, 32, 48];
+    let p = '';
+    rings.forEach(r => { p += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="rgba(255,205,120,0.13)" stroke-width="0.6"/>`; });
+    for (let a = 0; a < 360; a += 45) {
+      const rad = a * Math.PI / 180, x2 = (c + 48 * Math.cos(rad)).toFixed(2), y2 = (c + 48 * Math.sin(rad)).toFixed(2);
+      p += `<line x1="${c}" y1="${c}" x2="${x2}" y2="${y2}" stroke="rgba(255,205,120,0.09)" stroke-width="0.5"/>`;
+    }
+    p += `<line x1="2" y1="${c}" x2="98" y2="${c}" stroke="rgba(255,215,140,0.22)" stroke-width="0.7"/>`;
+    p += `<line x1="${c}" y1="2" x2="${c}" y2="98" stroke="rgba(255,215,140,0.22)" stroke-width="0.7"/>`;
+    p += `<circle cx="${c}" cy="${c}" r="1.5" fill="rgba(255,225,160,0.55)"/>`;
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'>${p}</svg>`;
+    return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
   }
 
   function removeChip() {
@@ -27,17 +45,10 @@
   function buildChip() { try { _buildChip(); } catch (e) { console.error('[fog] buildChip failed:', e); } }
 
   function _buildChip() {
-    console.log('[fog] buildChip: start');
-    if (document.getElementById(CHIP_ID)) { console.log('[fog] buildChip: panel already present'); return; }
-    if (!document.body) { console.log('[fog] buildChip: no body yet, waiting for DOMContentLoaded'); document.addEventListener('DOMContentLoaded', buildChip, { once: true }); return; }
+    if (document.getElementById(CHIP_ID)) return;
+    if (!document.body) { document.addEventListener('DOMContentLoaded', buildChip, { once: true }); return; }
 
-    // --- the grade "recipe": an invisible SVG <filter> -----------------------
-    // Each channel is one feFunc type="linear" (an affine map): exposure,
-    // temperature and the coupled dim are all multiplies + a contrast pivot, so
-    // they collapse into per-channel slope/intercept we rewrite live. The
-    // feColorMatrix is the slot for saturation (mixes channels, so it can't
-    // live in the per-channel transfer). Built with createElementNS — no
-    // innerHTML parsing that could fail.
+    // --- SVG grade recipe: feColorMatrix (saturation) + per-channel affine ---
     const holder = document.createElement('div');
     holder.id = SVG_ID;
     holder.setAttribute('aria-hidden', 'true');
@@ -48,8 +59,8 @@
     filter.setAttribute('x', '0'); filter.setAttribute('y', '0');
     filter.setAttribute('width', '100%'); filter.setAttribute('height', '100%');
     filter.setAttribute('color-interpolation-filters', 'sRGB');
-    const sat = document.createElementNS(NS, 'feColorMatrix');
-    sat.setAttribute('type', 'saturate'); sat.setAttribute('values', '1');
+    const satNode = document.createElementNS(NS, 'feColorMatrix');
+    satNode.setAttribute('type', 'saturate'); satNode.setAttribute('values', '1');
     const xfer = document.createElementNS(NS, 'feComponentTransfer');
     const mk = (tag) => {
       const f = document.createElementNS(NS, tag);
@@ -58,174 +69,152 @@
     };
     const fnR = mk('feFuncR'), fnG = mk('feFuncG'), fnB = mk('feFuncB');
     xfer.append(fnR, fnG, fnB);
-    filter.append(sat, xfer);
+    filter.append(satNode, xfer);           // saturate first, then tone/temp
     svg.appendChild(filter);
     holder.appendChild(svg);
 
-    // --- the panel (plain fixed element on <html>, like the original) --------
+    // --- panel: square pad + polar grid + two gem discs ---------------------
     const facetRing = buildFacets();
+    const gridBg = gridBackground();
+    const silverBg = `${facetRing}, radial-gradient(circle at 42% 35%, #FCFDFE, #C9CFD6 55%, #7E858E)`;
+    const goldBg = `${facetRing}, radial-gradient(circle at 42% 35%, #FBEEB0, #C8952A 55%, #7A560F)`;
+
     const chip = document.createElement('div');
     chip.id = CHIP_ID;
     chip.innerHTML = `
       <style>
         #${CHIP_ID}{
           position:fixed; top:60px; right:60px; left:auto; bottom:auto;
-          margin:0; padding:7px 11px; overflow:visible;
-          height:28px; z-index:2147483647; opacity:.85;
-          border:1px solid #5C3A0A; border-radius:7px;
+          margin:0; padding:10px; box-sizing:border-box; z-index:2147483647;
+          border:1px solid #5C3A0A; border-radius:14px; opacity:.96;
           background:
-            radial-gradient(120% 90% at 50% -20%, rgba(255,210,120,.10), transparent 60%),
+            radial-gradient(120% 90% at 50% -10%, rgba(255,210,120,.10), transparent 60%),
             linear-gradient(180deg,#2A1A06,#150B02);
-          box-shadow:0 3px 14px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,200,80,.12);
-          display:flex; flex-direction:row; align-items:center; justify-content:center;
-          gap:12px; box-sizing:border-box; cursor:grab;
+          box-shadow:0 6px 20px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,200,80,.14);
+          cursor:grab; user-select:none; -webkit-user-select:none; touch-action:none;
         }
-        #${CHIP_ID}::before{
-          content:""; position:absolute; inset:3px; border-radius:5px;
-          background:repeating-conic-gradient(from 0deg, rgba(255,200,90,.05) 0deg 6deg, transparent 6deg 12deg);
-          pointer-events:none;
+        #${CHIP_ID} .pad{
+          position:relative; width:${PAD}px; height:${PAD}px; border-radius:10px;
+          background-color:#120A02; background-image:${gridBg};
+          background-size:100% 100%;
+          box-shadow:inset 0 0 0 1px rgba(255,200,90,.12), inset 0 2px 12px rgba(0,0,0,.6);
+          overflow:hidden;
         }
-        #${CHIP_ID} input[type=range]{
-          -webkit-appearance:none; appearance:none;
-          width:48px; height:5px; margin:0; border-radius:3px; outline:none; pointer-events:none;
+        #${CHIP_ID} .ff-disc{
+          position:absolute; width:${DISC}px; height:${DISC}px; border-radius:50%;
+          transform:translate(-50%,-50%); cursor:grab;
+          box-shadow:0 3px 6px rgba(0,0,0,.6), inset 0 1px 2px rgba(255,255,255,.45), inset 0 -3px 4px rgba(0,0,0,.45);
         }
-        #${CHIP_ID} input.ff-dim{  background:linear-gradient(90deg,#2c2f33,#C9CDD3,#2c2f33); }
-        #${CHIP_ID} input.ff-exp{  background:linear-gradient(90deg,#0c0c0c,#888,#f4f4f4); }
-        #${CHIP_ID} input.ff-temp{ background:linear-gradient(90deg,#3a6ea5,#9aa0a6,#C8952A); }
-        #${CHIP_ID} input.ff-vol{  background:linear-gradient(90deg,#3a2406,#C8952A,#3a2406); }
-        #${CHIP_ID} input[type=range]::-webkit-slider-thumb{
-          -webkit-appearance:none; appearance:none;
-          width:${KNOB}px; height:${KNOB}px; clip-path:${OCTAGON};
-          box-shadow:0 1px 2px rgba(0,0,0,.7);
+        #${CHIP_ID} .ff-silver{ background:${silverBg}; }
+        #${CHIP_ID} .ff-gold{   background:${goldBg}; }
+        #${CHIP_ID} .cap{
+          display:flex; gap:12px; justify-content:center; margin-top:8px;
+          font:600 9px/1.2 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+          color:rgba(255,212,146,.78); letter-spacing:.2px;
         }
-        #${CHIP_ID} input.ff-dim::-webkit-slider-thumb,
-        #${CHIP_ID} input.ff-exp::-webkit-slider-thumb{
-          background:${facetRing}, radial-gradient(circle at 50% 38%, #F6F7F9, #B9BFC7 58%, #868C94);
-        }
-        #${CHIP_ID} input.ff-temp::-webkit-slider-thumb,
-        #${CHIP_ID} input.ff-vol::-webkit-slider-thumb{
-          background:${facetRing}, radial-gradient(circle at 50% 38%, #F4DC92, #C8952A 58%, #8A6418);
-        }
+        #${CHIP_ID} .cap i{ display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+        #${CHIP_ID} .cap i.s{ background:#C9CFD6; } #${CHIP_ID} .cap i.g{ background:#C8952A; }
       </style>
-      <input type="range" class="ff-dim"  min="0" max="100" value="50"  step="1" title="Dim / brighten (dim raises contrast)">
-      <input type="range" class="ff-exp"  min="0" max="100" value="50"  step="1" title="Exposure (±2 stops)">
-      <input type="range" class="ff-temp" min="0" max="100" value="50"  step="1" title="Temperature (cool ↔ warm)">
-      <input type="range" class="ff-vol"  min="0" max="100" value="100" step="1" title="Volume">
+      <div class="pad">
+        <div class="ff-disc ff-silver" data-k="silver" title="Silver — X: brightness · Y: contrast"></div>
+        <div class="ff-disc ff-gold"   data-k="gold"   title="Gold — X: temperature · Y: saturation"></div>
+      </div>
+      <div class="cap"><span><i class="s"></i>bright · contrast</span><span><i class="g"></i>warm · saturation</span></div>
     `;
 
     const root = document.documentElement;
     root.appendChild(holder);
     root.appendChild(chip);
-    console.log('[fog] buildChip: panel appended', chip.getBoundingClientRect());
+    console.log('[fog] pad panel appended');
 
-    const dimSlider = chip.querySelector('.ff-dim');
-    const expSlider = chip.querySelector('.ff-exp');
-    const tempSlider = chip.querySelector('.ff-temp');
-    const volSlider = chip.querySelector('.ff-vol');
-    const val = s => parseInt(s.value, 10);
+    const pad = chip.querySelector('.pad');
+    const discEls = { silver: chip.querySelector('.ff-silver'), gold: chip.querySelector('.ff-gold') };
+    // disc centre in pad pixels; centre of pad = neutral
+    const state = { silver: { cx: PAD / 2, cy: PAD / 2 }, gold: { cx: PAD / 2, cy: PAD / 2 } };
 
-    // --- the grade: rewrite the per-channel affine maps, then point body at it
+    function renderDisc(k) { discEls[k].style.left = state[k].cx + 'px'; discEls[k].style.top = state[k].cy + 'px'; }
+    // pad pixel -> normalized axis in [-1,1]; y flipped so up = +1
+    function norm(px) { const usable = PAD - 2 * DR; return { nx: ((state[px].cx - DR) / usable) * 2 - 1, ny: -(((state[px].cy - DR) / usable) * 2 - 1) }; }
+
     function setFn(fn, slope, intercept) {
       fn.setAttribute('slope', slope.toFixed(4));
       fn.setAttribute('intercept', intercept.toFixed(4));
     }
     function applyGrade() {
-      const expMul = Math.pow(2, (val(expSlider) - 50) / 25);   // ±2 stops
-      const t = (val(dimSlider) - 50) / 50;                     // -1..1
-      const bDim = 1 + 0.6 * t, cDim = 1 - 0.5 * t;             // brightness / contrast, coupled
-      const k = (val(tempSlider) - 50) / 50 * 0.3;              // warm: R up, B down
-      const inter = 0.5 * (1 - cDim);                           // contrast pivot at 0.5, shared
-      setFn(fnR, expMul * bDim * (1 + k) * cDim, inter);
-      setFn(fnG, expMul * bDim * cDim, inter);
-      setFn(fnB, expMul * bDim * (1 - k) * cDim, inter);
+      const s = norm('silver'), g = norm('gold');
+      const b = Math.pow(2, s.nx);            // brightness: ±1 stop (0.5..2)
+      const c = 1 + s.ny * 0.6;               // contrast: 0.4..1.6
+      const k = g.nx * 0.3;                   // temperature: warm(+) / cool(-)
+      const sat = Math.max(0, 1 + g.ny);      // saturation: 0..2
+      const inter = 0.5 * (1 - c);            // contrast pivot at 0.5
+      setFn(fnR, b * (1 + k) * c, inter);
+      setFn(fnG, b * 1 * c, inter);
+      setFn(fnB, b * (1 - k) * c, inter);
+      satNode.setAttribute('values', sat.toFixed(3));
       document.body.style.setProperty('filter', `url(#${GRADE_ID})`, 'important');
     }
 
-    // --- volume (unchanged behaviour) ---------------------------------------
-    let currentVol = 1, volTouched = false;
-    function applyVolume() {
-      if (!volTouched) return;
-      document.querySelectorAll('video, audio').forEach(m => { try { m.volume = currentVol; } catch (e) {} });
-    }
-    function applyVolFromSlider() { currentVol = val(volSlider) / 100; volTouched = true; applyVolume(); }
+    renderDisc('silver'); renderDisc('gold');
+    applyGrade();   // neutral identity — nothing visible until a disc moves
 
-    const mo = new MutationObserver(muts => {
-      if (!volTouched) return;
-      for (const mu of muts) for (const n of mu.addedNodes) {
-        if (n.nodeType !== 1) continue;
-        if (n.matches && n.matches('video,audio')) { try { n.volume = currentVol; } catch (e) {} }
-        if (n.querySelectorAll) n.querySelectorAll('video,audio').forEach(el => { try { el.volume = currentVol; } catch (e) {} });
-      }
-    });
-    mo.observe(root, { childList: true, subtree: true });
-    window.__reaFogCleanup = () => {
-      mo.disconnect();
-      if (volTouched) document.querySelectorAll('video,audio').forEach(m => { try { m.volume = 1; } catch (e) {} });
-    };
-
-    // --- knob + drag interaction --------------------------------------------
-    function applyFor(s) { (s === volSlider) ? applyVolFromSlider() : applyGrade(); }
-    function knobCenter(s) {
-      const r = s.getBoundingClientRect(), v = val(s);
-      return { x: r.left + (v / 100) * (r.width - KNOB) + KNOB / 2, y: r.top + r.height / 2 };
-    }
-    function valueFromX(s, clientX) {
-      const r = s.getBoundingClientRect(), span = r.width - KNOB;
-      const v = span > 0 ? ((clientX - r.left - KNOB / 2) / span) * 100 : 0;
-      return Math.max(0, Math.min(100, Math.round(v)));
-    }
-    function nearKnob(x, y) {
-      for (const s of [dimSlider, expSlider, tempSlider, volSlider]) {
-        const c = knobCenter(s); if (Math.hypot(x - c.x, y - c.y) <= HIT) return s;
-      }
-      return null;
-    }
-    function clampToViewport(left, top) {
-      const w = chip.offsetWidth, h = chip.offsetHeight;
-      chip.style.right = 'auto'; chip.style.bottom = 'auto';
-      chip.style.left = Math.max(0, Math.min(left, window.innerWidth - w)) + 'px';
-      chip.style.top = Math.max(0, Math.min(top, window.innerHeight - h)) + 'px';
-    }
-
-    let moveDrag = false, knobDrag = null, ox = 0, oy = 0;
-    chip.addEventListener('mousedown', e => {
-      const s = nearKnob(e.clientX, e.clientY);
-      if (s) {
-        knobDrag = s; chip.style.cursor = 'ew-resize';
-        s.value = valueFromX(s, e.clientX); applyFor(s);
+    // --- drag: a disc moves in the plane; empty pad / frame moves the panel --
+    const padPoint = e => { const r = pad.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    let drag = null;
+    chip.addEventListener('pointerdown', e => {
+      const discEl = e.target.closest('.ff-disc');
+      if (discEl) {
+        const k = discEl.dataset.k, p = padPoint(e);
+        drag = { type: 'disc', k, offx: p.x - state[k].cx, offy: p.y - state[k].cy };
+        discEl.style.cursor = 'grabbing';
       } else {
-        moveDrag = true;
         const r = chip.getBoundingClientRect();
-        ox = e.clientX - r.left; oy = e.clientY - r.top;
+        drag = { type: 'move', ox: e.clientX - r.left, oy: e.clientY - r.top };
         chip.style.cursor = 'grabbing';
       }
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp, { once: true });
       e.preventDefault();
     });
-    document.addEventListener('mousemove', e => {
-      if (knobDrag) { knobDrag.value = valueFromX(knobDrag, e.clientX); applyFor(knobDrag); return; }
-      if (moveDrag) { clampToViewport(e.clientX - ox, e.clientY - oy); return; }
-      const r = chip.getBoundingClientRect();
-      if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
-        chip.style.cursor = nearKnob(e.clientX, e.clientY) ? 'ew-resize' : 'grab';
+    function onMove(e) {
+      if (!drag) return;
+      if (drag.type === 'disc') {
+        const p = padPoint(e), st = state[drag.k];
+        st.cx = clamp(p.x - drag.offx, DR, PAD - DR);
+        st.cy = clamp(p.y - drag.offy, DR, PAD - DR);
+        renderDisc(drag.k); applyGrade();
+      } else {
+        chip.style.right = 'auto'; chip.style.bottom = 'auto';
+        chip.style.left = clamp(e.clientX - drag.ox, 0, window.innerWidth - chip.offsetWidth) + 'px';
+        chip.style.top = clamp(e.clientY - drag.oy, 0, window.innerHeight - chip.offsetHeight) + 'px';
       }
-    });
-    document.addEventListener('mouseup', () => { knobDrag = null; moveDrag = false; chip.style.cursor = 'grab'; });
-    window.addEventListener('resize', () => { const r = chip.getBoundingClientRect(); clampToViewport(r.left, r.top); });
+    }
+    function onUp() {
+      window.removeEventListener('pointermove', onMove);
+      drag = null; chip.style.cursor = 'grab';
+      discEls.silver.style.cursor = discEls.gold.style.cursor = 'grab';
+    }
 
-    applyGrade();   // neutral identity; nothing visible until a knob moves
+    // double-click a disc to snap it back to neutral (centre)
+    chip.addEventListener('dblclick', e => {
+      const discEl = e.target.closest('.ff-disc');
+      if (!discEl) return;
+      const k = discEl.dataset.k;
+      state[k].cx = PAD / 2; state[k].cy = PAD / 2;
+      renderDisc(k); applyGrade(); e.preventDefault();
+    });
+
+    window.__reaFogCleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+    };
   }
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (!msg) return;
-    console.log('[fog] message:', msg.type);
     if (msg.type === 'fog-on') buildChip();
     else if (msg.type === 'fog-off') removeChip();
   });
 
   try {
-    chrome.storage.local.get('enabled', (o) => {
-      console.log('[fog] storage enabled =', o && o.enabled);
-      if (o && o.enabled) buildChip();
-    });
+    chrome.storage.local.get('enabled', (o) => { if (o && o.enabled) buildChip(); });
   } catch (e) { console.error('[fog] storage read failed:', e); }
 })();
